@@ -1,46 +1,46 @@
 # autoresearch
 
-This is an experiment to have the LLM do its own research.
+An experiment in having the LLM do its own research: autonomously modify `train.py`, run fixed-budget training experiments, and drive `val_bpb` down — keeping what works, discarding what doesn't.
 
-## Setup
+The work is split across four role-specialized agents. This file holds the **shared ground truth** they all rely on (the facts their definitions point back to "from program.md") plus the setup procedure and how to start a run. Each agent's own responsibilities, tools, and artifact contract live in its definition.
 
-To set up a new experiment, work with the user to:
+## Agents
 
-1. **Agree on a run tag**: propose a tag based on today's date (e.g. `mar5`). The branch `autoresearch/<tag>` must not already exist — this is a fresh run.
+The **orchestrator runs in the main session** (Claude Code subagents can't reliably spawn nested subagents); it invokes the other three via the Agent tool.
+
+- **[orchestrator](.claude/agents/orchestrator.md)** — plans experiments, dispatches the workers, tracks the ledger, decides keep-vs-discard, diagnoses failures. Never edits code or runs commands.
+- **[research-agent](.claude/agents/research-agent.md)** — mines `index/research/` and the code to write concrete experiment proposals (`experiments/proposals/`).
+- **[llm-engineer](.claude/agents/llm-engineer.md)** — the only agent that edits `train.py`, commits, runs `uv run train.py`, debugs crashes, and executes git keep/reset. Produces `run.log`.
+- **[evaluator](.claude/agents/evaluator.md)** — logs results to `results.tsv`, writes reports (`experiments/reports/`), recommends keep/discard. No code execution.
+
+## Setup (once per run)
+
+1. **Agree on a run tag**: propose one based on today's date (e.g. `jun20`). The branch `autoresearch/<tag>` must not already exist — this is a fresh run.
 2. **Create the branch**: `git checkout -b autoresearch/<tag>` from current master.
-3. **Read the in-scope files**: The repo is small. Read these files for full context:
-   - `README.md` — repository context.
-   - `prepare.py` — fixed constants, data prep, tokenizer, dataloader, evaluation. Do not modify.
-   - `train.py` — the file you modify. Model architecture, optimizer, training loop.
-4. **Verify data exists**: Check that `~/.cache/autoresearch/` contains data shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
-5. **Initialize results.tsv**: Create `results.tsv` with just the header row. The baseline will be recorded after the first run.
-6. **Confirm and go**: Confirm setup looks good.
+3. **Read the in-scope files** for full context: `README.md` (repo context), `prepare.py` (fixed constants, data, tokenizer, evaluation — read-only), `train.py` (the file you modify).
+4. **Verify data exists**: check `~/.cache/autoresearch/` contains data shards and a tokenizer. If not, tell the human to run `uv run prepare.py`.
+5. **Initialize `results.tsv`** with just the header row (see schema below). The baseline is recorded after the first run.
+6. **Confirm** setup looks good, then start the loop. The **first experiment is always the baseline** — run `train.py` as-is.
 
-Once you get confirmation, kick off the experimentation.
+## Ground truth
 
-## Experimentation
+**Goal**: get the lowest `val_bpb`. The metric is `evaluate_bpb` in `prepare.py` — it is the ground truth and must never be modified.
 
-Each experiment runs on a single GPU. The training script runs for a **fixed time budget of 5 minutes** (wall clock training time, excluding startup/compilation). You launch it simply as: `uv run train.py`.
+**Budget**: each experiment trains for a **fixed 5-minute wall-clock budget** (excluding startup/compilation) on a single GPU. The script self-stops at the budget, so total time is always ~5 min. Launch it as `uv run train.py` (in the loop: `uv run train.py > run.log 2>&1`). If a run exceeds 10 minutes, kill it and treat it as a failure.
 
-**What you CAN do:**
-- Modify `train.py` — this is the only file you edit. Everything is fair game: model architecture, optimizer, hyperparameters, training loop, batch size, model size, etc.
+**VRAM** is a soft constraint: some increase is fine for meaningful `val_bpb` gains, but it shouldn't blow up dramatically.
 
-**What you CANNOT do:**
-- Modify `prepare.py`. It is read-only. It contains the fixed evaluation, data loading, tokenizer, and training constants (time budget, sequence length, etc).
-- Install new packages or add dependencies. You can only use what's already in `pyproject.toml`.
-- Modify the evaluation harness. The `evaluate_bpb` function in `prepare.py` is the ground truth metric.
+**Simplicity criterion**: all else equal, simpler is better. A small gain that adds ugly complexity isn't worth it; removing code for equal-or-better results is a win. Weigh complexity cost against improvement magnitude (a 0.001 gain from 20 hacky lines? probably not. a 0.001 gain from deleting code? definitely keep. ~0 change but much simpler? keep).
 
-**The goal is simple: get the lowest val_bpb.** Since the time budget is fixed, you don't need to worry about training time — it's always 5 minutes. Everything is fair game: change the architecture, the optimizer, the hyperparameters, the batch size, the model size. The only constraint is that the code runs without crashing and finishes within the time budget.
+**What can change**: only `train.py` — architecture, optimizer, hyperparameters, training loop, batch size, model size; all fair game.
 
-**VRAM** is a soft constraint. Some increase is acceptable for meaningful val_bpb gains, but it should not blow up dramatically.
+**What cannot change**: `prepare.py` (fixed constants, data, tokenizer, evaluation); the `evaluate_bpb` harness; the dependency set (no new packages beyond `pyproject.toml`).
 
-**Simplicity criterion**: All else being equal, simpler is better. A small improvement that adds ugly complexity is not worth it. Conversely, removing something and getting equal or better results is a great outcome — that's a simplification win. When evaluating whether to keep a change, weigh the complexity cost against the improvement magnitude. A 0.001 val_bpb improvement that adds 20 lines of hacky code? Probably not worth it. A 0.001 val_bpb improvement from deleting code? Definitely keep. An improvement of ~0 but much simpler code? Keep.
-
-**The first run**: Your very first run should always be to establish the baseline, so you will run the training script as is.
+**Autonomy — NEVER STOP**: once the loop begins, do not pause to ask the human whether to continue. They may be away and expect indefinite autonomous work (≈12 experiments/hour, ≈100 overnight). If ideas run dry, think harder: re-read `index/research/` and the in-scope files, combine near-misses, try more radical changes. The loop runs until the human interrupts.
 
 ## Output format
 
-Once the script finishes it prints a summary like this:
+When the script finishes it prints a summary block:
 
 ```
 ---
@@ -55,60 +55,44 @@ num_params_M:     50.3
 depth:            8
 ```
 
-Note that the script is configured to always stop after 5 minutes, so depending on the computing platform of this computer the numbers might look different. You can extract the key metric from the log file:
+Extract the key fields with: `grep "^val_bpb:\|^peak_vram_mb:" run.log`. Empty output means the run crashed (`tail -n 50 run.log` for the trace).
 
-```
-grep "^val_bpb:" run.log
-```
+## results.tsv schema
 
-## Logging results
-
-When an experiment is done, log it to `results.tsv` (tab-separated, NOT comma-separated — commas break in descriptions).
-
-The TSV has a header row and 5 columns:
+Tab-separated (NOT comma — commas break the description column). Header row plus one row per experiment, **left untracked by git** (never commit it):
 
 ```
 commit	val_bpb	memory_gb	status	description
 ```
 
-1. git commit hash (short, 7 chars)
-2. val_bpb achieved (e.g. 1.234567) — use 0.000000 for crashes
-3. peak memory in GB, round to .1f (e.g. 12.3 — divide peak_vram_mb by 1024) — use 0.0 for crashes
-4. status: `keep`, `discard`, or `crash`
-5. short text description of what this experiment tried
+1. `commit` — short 7-char git hash
+2. `val_bpb` — e.g. `1.234567`; use `0.000000` for crashes
+3. `memory_gb` — `peak_vram_mb / 1024`, rounded to .1f; use `0.0` for crashes
+4. `status` — `keep`, `discard`, or `crash`
+5. `description` — short, comma-free summary of what the experiment tried
 
 Example:
 
 ```
 commit	val_bpb	memory_gb	status	description
 a1b2c3d	0.997900	44.0	keep	baseline
-b2c3d4e	0.993200	44.2	keep	increase LR to 0.04
+b2c3d4e	0.993200	44.2	keep	increase matrix LR to 0.04
 c3d4e5f	1.005000	44.0	discard	switch to GeLU activation
 d4e5f6g	0.000000	0.0	crash	double model width (OOM)
 ```
 
-## The experiment loop
+## Starting a run
 
-The experiment runs on a dedicated branch (e.g. `autoresearch/mar5` or `autoresearch/mar5-gpu0`).
+The orchestrator role lives in the main session. To kick off the loop, run the entrypoint slash command from the repo root:
 
-LOOP FOREVER:
+```
+/autoresearch <tag>
+```
 
-1. Look at the git state: the current branch/commit we're on
-2. Tune `train.py` with an experimental idea by directly hacking the code.
-3. git commit
-4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-5. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
-6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
-7. Record the results in the tsv (NOTE: do not commit the results.tsv file, leave it untracked by git)
-8. If val_bpb improved (lower), you "advance" the branch, keeping the git commit
-9. If val_bpb is equal or worse, you git reset back to where you started
+e.g. `/autoresearch jun20`. This tells the main session to adopt the orchestrator role, do setup for branch `autoresearch/<tag>`, and begin the loop. See [.claude/commands/autoresearch.md](.claude/commands/autoresearch.md).
 
-The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
+For a headless / unattended run, launch Claude Code non-interactively with the same instruction:
 
-**Timeout**: Each experiment should take ~5 minutes total (+ a few seconds for startup and eval overhead). If a run exceeds 10 minutes, kill it and treat it as a failure (discard and revert).
-
-**Crashes**: If a run crashes (OOM, or a bug, or etc.), use your judgment: If it's something dumb and easy to fix (e.g. a typo, a missing import), fix it and re-run. If the idea itself is fundamentally broken, just skip it, log "crash" as the status in the tsv, and move on.
-
-**NEVER STOP**: Once the experiment loop has begun (after the initial setup), do NOT pause to ask the human if you should continue. Do NOT ask "should I keep going?" or "is this a good stopping point?". The human might be asleep, or gone from a computer and expects you to continue working *indefinitely* until you are manually stopped. You are autonomous. If you run out of ideas, think harder — read papers referenced in the code, re-read the in-scope files for new angles, try combining previous near-misses, try more radical architectural changes. The loop runs until the human interrupts you, period.
-
-As an example use case, a user might leave you running while they sleep. If each experiment takes you ~5 minutes then you can run approx 12/hour, for a total of about 100 over the duration of the average human sleep. The user then wakes up to experimental results, all completed by you while they slept!
+```
+claude "Adopt the orchestrator role defined in .claude/agents/orchestrator.md. Do the program.md setup for run tag jun20, then run the experiment loop autonomously until interrupted."
+```

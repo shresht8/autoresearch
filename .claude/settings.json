@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "bash": [
+      "git",
+      "uv",
+      "python",
+      "echo"
+    ],
+    "glob": {
+      "allowed": true
+    },
+    "grep": {
+      "allowed": true
+    },
+    "read": {
+      "blocked_patterns": [
+        "**/.env*",
+        "**/*.key",
+        "**/*.pem",
+        "**/*secret*",
+        "**/*credentials*",
+        "**/config/**/*",
+        "**/.aws/**",
+        "**/.gcp/**"
+      ]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+1. Now describe the training stages that were involved in training deepseek v3. Give details about the following for each step (None if missing):
+- Data used and how it was constructed
+- Training details including compute, evaluations, loss functions
+- Key observations 
+
+2. 
