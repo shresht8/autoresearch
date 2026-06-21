@@ -29,8 +29,9 @@ Write each proposal as its own file: `experiments/proposals/<tag>-NNN.md` (e.g. 
 5. **VRAM risk** — does it raise peak memory? VRAM is a soft constraint; flag anything likely to blow up.
 6. **Complexity cost** — lines added / conceptual complexity, so the orchestrator can weigh it against the simplicity criterion. Prefer simple, high-leverage changes; surface simplification opportunities (removing code for equal/better results is a win).
 7. **References** — file paths in `index/research/` or URLs.
+8. **Regime & transfer intent** — is this a cheap *exploratory probe* (small model / short time budget, run in parallel) or a candidate for the *final full-capacity run*? Say what *transferable pattern* the experiment is meant to reveal (e.g. "does higher LR keep helping as steps grow?", "best depth:width ratio") so the orchestrator can apply the learning at the final run rather than treating it as a one-off. Note the rough resource footprint so capacity-planner can pre-flight it.
 
-Favor a small number of high-quality, diverse proposals over many shallow ones. When useful, sequence them (a cheap probe before an expensive architectural change).
+Favor a small number of high-quality, diverse proposals over many shallow ones. When useful, sequence them (a cheap probe before an expensive architectural change). Prefer experiments that isolate **one scale-robust knob** (optimizer, LR, schedule, normalization) over those whose benefit is tied to one exact step count — the former transfer to the final run.
 
 ## Can / Cannot
 
@@ -41,8 +42,8 @@ Favor a small number of high-quality, diverse proposals over many shallow ones. 
 
 - Work only within `train.py`'s editable surface; `prepare.py`, `evaluate_bpb`, and the fixed constants are off-limits.
 - No new dependencies — only what's in `pyproject.toml` (torch 2.9.1, kernels/flash-attn, tiktoken, rustbpe, numpy, pandas, pyarrow, requests, matplotlib).
-- Every idea must fit the 5-minute single-GPU budget — a great idea that needs far more steps/compute to show value is a bad fit; note this if relevant.
+- Experiments now run under **variable time budgets and on GPU slices**, not just a fixed 5 min. Exploratory probes may use short budgets (e.g. 60–120 s) on a fraction of the GPU; the final run uses the full GPU and a long budget. Match the proposal to its regime, and flag ideas whose value only appears with many steps as "confirm at the longer budget."
 
 ## Persistent memory
 
-You have a project-scoped memory directory at `.claude/agent-memory/research-agent/`. Record durable research learnings: which lines of inquiry from the knowledge base proved fruitful or dead-ended under this budget, techniques that consistently help/hurt at this scale, and useful external references. Do not duplicate `results.tsv` rows or per-experiment specifics — store the generalizable insight.
+You have a project-scoped memory directory at `.claude/agent-memory/research-agent/`. Record **higher-order, transferable** research learnings — ones with strong enough signal to hold in *different environments* (more compute, longer budgets, different data): which lines of inquiry from the knowledge base proved fruitful or dead-ended, techniques that consistently help/hurt across scales, whether short-budget findings transferred to long runs, and useful external references. Avoid insights bound to this GPU/model-size/time-budget — store the generalizable principle and how strong the signal was.

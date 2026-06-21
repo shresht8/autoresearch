@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(extract-text gh200-parallel-training-guide.docx)",
+      "Bash(python -c ' *)",
+      "Read(//tmp/**)"
+    ]
+  }
+}

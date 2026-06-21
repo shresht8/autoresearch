@@ -1,28 +1,77 @@
 {
   "permissions": {
-    "bash": [
-      "git",
-      "uv",
-      "python",
-      "echo"
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Task",
+      "Agent",
+      "TodoWrite",
+      "WebSearch",
+      "WebFetch",
+      "Bash(git:*)",
+      "Bash(uv:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pip:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(echo:*)",
+      "Bash(pwd)",
+      "Bash(cd:*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(cut:*)",
+      "Bash(diff:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(nvcc:*)",
+      "Bash(nproc:*)",
+      "Bash(lscpu:*)",
+      "Bash(numactl:*)",
+      "Bash(free:*)",
+      "Bash(ps:*)",
+      "Bash(dcgmi:*)",
+      "Bash(nvitop:*)",
+      "Bash(nvidia-cuda-mps-control:*)",
+      "Bash(fuser:*)",
+      "Bash(kill:*)",
+      "Bash(tmux:*)",
+      "Bash(sleep:*)",
+      "Bash(date:*)",
+      "Bash(which:*)"
     ],
-    "glob": {
-      "allowed": true
-    },
-    "grep": {
-      "allowed": true
-    },
-    "read": {
-      "blocked_patterns": [
-        "**/.env*",
-        "**/*.key",
-        "**/*.pem",
-        "**/*secret*",
-        "**/*credentials*",
-        "**/config/**/*",
-        "**/.aws/**",
-        "**/.gcp/**"
-      ]
-    }
+    "ask": [
+      "Bash(git push:*)"
+    ],
+    "deny": [
+      "Read(**/.env*)",
+      "Read(**/*.key)",
+      "Read(**/*.pem)",
+      "Read(**/*secret*)",
+      "Read(**/*credentials*)",
+      "Read(**/config/**/*)",
+      "Read(**/.aws/**)",
+      "Read(**/.gcp/**)",
+      "Bash(sudo:*)",
+      "Bash(rm -rf:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
   }
 }
+

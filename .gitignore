@@ -21,3 +21,12 @@ dev/
 
 # Results file
 results.tsv
+
+# Per-run artifacts (untracked so they survive branch checkouts)
+run.log
+experiments/
+
+# Agent memory (filesystem-level, must persist across checkouts — not branch-specific)
+.claude/agent-memory/
+claude.zip
+gh200-parallel-training-guide.docx
