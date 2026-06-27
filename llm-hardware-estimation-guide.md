@@ -17,7 +17,7 @@ Use this guide when you are:
 - Sizing a new model or a hyperparameter change and want to know if it will fit on the target GPU.
 - Debugging an OOM crash and need to know which knob to lower first.
 - Comparing two recipes (e.g. AdamW vs Muon, micro-batch 64 vs 128) on a memory and throughput basis.
-- Planning two parallel experiments on a GH200 — combine with [gh200-parallel-training-guide.docx](gh200-parallel-training-guide.docx) to slice the GPU into MIG/MPS halves and estimate per-half budgets.
+- Planning  parallel experiments on a GH200 — combine with [parallel-training-guide](parallel-training-guide.md) to slice the GPU into MIG/MPS halves and estimate per-half budgets.
 
 The guide ships with a Python calculator ([vram_calculator.py](vram_calculator.py)) that does the arithmetic. The math here is intentionally simple and conservative: it is meant to keep you out of the OOM ditch, not to predict peak VRAM to the megabyte.
 
@@ -405,7 +405,7 @@ Rough largest "safe" single-GPU autoresearch-style config (5-min budget, 85% of 
 
 ### 6.4 If You're Splitting a GH200 with MIG or MPS
 
-When running two parallel autoresearch experiments on one GH200 (see the [companion gh200 guide](gh200-parallel-training-guide.docx)), estimate each half independently against a smaller GPU profile:
+When running two parallel autoresearch experiments on one GH200 (see the [parallel training guide](parallel-training-guide.md)), estimate each half independently against a smaller GPU profile:
 
 - **MPS 50/50 split:** estimate each job against `--gpu gh200-96` but with a 40 GB headroom target (`--headroom-pct ~58`).
 - **MIG 3g.48gb × 2:** estimate each job against `--gpu a100-40` (closest VRAM size) and treat the 48 GB cap as the ceiling. Note that MIG disables NVLink-C2C on GH200 (see gh200 guide §4.3).

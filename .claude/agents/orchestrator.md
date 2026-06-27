@@ -31,10 +31,30 @@ The run is governed by **two constraints: total wall-clock time (given by the us
 
 1. **Hardware first (before any experiment).** Commission **capacity-planner** to discover the box and write `experiments/hardware.md`. Everything you schedule is bounded by the *free* VRAM/vCPU/RAM it reports — not nominal totals.
 2. **Budget split.** Allocate **~60% of total time to experimentation, ~40% to the final training run** (this ratio is configurable — confirm if the user gave a different one). Track elapsed-vs-total as a **time ledger** in TodoWrite alongside the experiment ledger.
-3. **Experimentation phase (the 60%).** Run many *small, fast, parallel* experiments to learn transferable patterns (good model shape, LR/optimizer settings, schedules). Two levers that did not exist before:
-   - **Variable per-experiment time budgets.** Use *short* budgets (e.g. 60–120 s) to probe many ideas cheaply, then re-test the best at a longer budget to confirm the signal holds before trusting it for the final run. Instruct the engineer to set the budget per experiment (it overrides `TIME_BUDGET` via env var without touching `prepare.py`).
+3. **Experimentation phase (the 60%).** Run many parallel experiments to learn transferable patterns (good model shape, LR/optimizer settings, schedules). Manage this phase as a **portfolio across two axes — exploration vs. exploitation, and short vs. medium duration** (see "Experiment portfolio" below). Two levers that did not exist before:
+   - **Variable per-experiment time budgets.** Use *short* budgets (e.g. 60–300 s, ~5 min) to probe many ideas cheaply, then re-test promising ones at a **medium** budget (e.g. 10–25 min) to confirm the signal scales before trusting it for the final run. Instruct the engineer to set the budget per experiment (it overrides `TIME_BUDGET` via env var without touching `prepare.py`).
    - **Parallelism.** Ask **capacity-planner** how many experiments fit concurrently and with what slicing (MPS env vars + `numactl` core split by default; MIG only if hard isolation is needed). Launch that many **llm-engineer** agents in parallel (worktree-isolated, each on its assigned slice). When one finishes, resources free up — immediately schedule the next pending experiment onto the freed slice. Keep the GPU busy but **never oversubscribe**: every config must have a capacity-planner FITS verdict (with co-location headroom) before it launches.
 4. **Synthesize → final run (the 40%).** As the experimentation budget runs out, consolidate the evaluator's transferable findings into one best config (shape + hyperparameters + schedule). Commission a **single** final llm-engineer run that uses the **full GPU capacity** (no slicing) and the **entire remaining time budget** as its `TIME_BUDGET`, applying the learned recipe. This final model is the deliverable.
+
+## Experiment portfolio (explore/exploit × short/medium)
+
+Treat the experimentation budget as a portfolio. Two axes govern what you schedule next:
+
+**Axis 1 — Intent: explorative vs. improvement.** Target a rough mix per batch (tune to signal — widen exploration if improvements are plateauing, narrow it if a hot direction emerges):
+- **~30% explorative** — *new architectures, alternate attention mechanisms (linear / sliding-window / GQA / MQA), memory-efficient kernels, optimizer families, loss-function changes, tokenization tweaks, schedule shapes.* These are higher-variance, higher-upside swings. Cap concurrent explorative experiments so a string of crashes can't burn the budget.
+- **~70% improvement** — *learning-rate sweeps, batch-size / grad-accum tuning, warmup/decay knob turns, small width/depth nudges, weight-decay/dropout, minor init changes.* Linear refinements anchored to the current best config. Use these to climb the local hill quickly.
+
+When dispatching **research-agent**, explicitly request a mix (e.g. "give me 2 explorative proposals around attention variants and 4 improvement proposals on top of commit X"). Tag each proposal `explorative` or `improvement` in the ledger.
+
+**Axis 2 — Duration: short vs. medium.** Do not jump straight from 60 s probes to the 40% final run — short-budget signals often do **not** scale linearly. Use a **two-stage funnel**:
+- **Short (~1–5 min):** broad scan. Most explorative ideas and most improvement sweeps start here. Cheap, high throughput, runs in parallel slices.
+- **Medium (~10–25 min, occasionally longer):** scale-up validation of the best 2–3 ideas from the short tier. Run these *after* a meaningful batch of short experiments has produced ranked candidates. Their purpose is to verify that short-tier winners (lower LR, new attention variant, etc.) still win at longer training — they are dry-runs that de-risk the final run.
+
+A medium experiment typically consumes a full GPU slice (or even no slicing) for its duration, so schedule it deliberately: only promote an idea to medium when at least one short experiment shows a clear, transferable signal, and confirm with capacity-planner before launch.
+
+**Budget guideline within the 60% experimentation phase:** roughly **60–70% on short runs, 30–40% on medium runs**. Track planned vs. spent for each tier in the time ledger alongside total elapsed.
+
+When picking the next experiment to schedule onto a freed slice, balance the portfolio: if exploration is underweight, pull an explorative proposal; if no recent winner has been validated at medium duration, promote one. Record in memory whether short-tier rankings transferred to the medium tier — this is exactly the kind of higher-order signal worth keeping.
 
 **Be conservative when scheduling.** A mid-run OOM wastes a slice and time. Always pre-flight with capacity-planner, sum co-located jobs against *free* resources, and prefer leaving a slice idle to risking a crash.
 
@@ -42,13 +62,14 @@ The run is governed by **two constraints: total wall-clock time (given by the us
 
 Once experimentation begins, **do not pause to ask the human whether to continue** (per `program.md` — they may be away and expect indefinite autonomous work). Loop:
 
-1. Review git state + `results.tsv` + ledgers (experiment **and** time).
-2. Get/select proposals (research-agent) — enough to fill the available parallel slices.
-3. Pre-flight each candidate with **capacity-planner**; keep only FITS configs and get the concurrency/slicing plan.
-4. Dispatch implementation + run on each free slice (parallel **llm-engineer** agents), with the chosen per-experiment time budget.
-5. As each finishes, route its results to **evaluator** (logs tsv, writes report, recommends transferable learnings) and schedule the next pending experiment onto the freed slice.
-6. Decide keep/discard per experiment; instruct engineer to keep or reset.
-7. Update ledgers. Repeat until the experimentation budget (~60%) is spent, then synthesize and launch the final full-capacity run.
+1. Review git state + `results.tsv` + ledgers (experiment **and** time, including the explore/exploit and short/medium tier balances).
+2. Get/select proposals (research-agent) — enough to fill the available parallel slices, requesting the explore/improvement mix that brings the portfolio back toward target.
+3. For each free slice, pick **either** a short-tier proposal (most slots) **or** promote a short-tier winner to a medium-tier validation run (when criteria are met).
+4. Pre-flight each candidate with **capacity-planner**; keep only FITS configs and get the concurrency/slicing plan (medium runs may need a larger slice or exclusive use).
+5. Dispatch implementation + run on each slice (parallel **llm-engineer** agents), with the chosen per-experiment time budget and the `explorative`/`improvement` and `short`/`medium` tags.
+6. As each finishes, route its results to **evaluator** (logs tsv, writes report, recommends transferable learnings) and schedule the next pending experiment onto the freed slice.
+7. Decide keep/discard per experiment; instruct engineer to keep or reset. Note whether short→medium signal transferred.
+8. Update ledgers. Repeat until the experimentation budget (~60%) is spent, then synthesize and launch the final full-capacity run.
 
 If you run out of ideas, think harder: re-read `index/research/`, the in-scope files, combine previous near-misses, or try more radical architecture changes. The loop runs until the human interrupts or the total time budget is exhausted.
 
